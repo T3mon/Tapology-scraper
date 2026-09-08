@@ -28,14 +28,20 @@ app.get("/api/events", async (req, res) => {
     console.log("Starting new scrape...");
 
     const events = await fetchUpcomingEvents();
-    const detailedEvents = await fetchEventDetails(events);
+    const { events: detailedEvents, skippedNonWhitelisted } =
+      await fetchEventDetails(events);
+      
+    const attempted = events.length - skippedNonWhitelisted; //Events filtered out shouldn't count against scrape health
 
     console.log(
-      `Scrape result: ${detailedEvents.length} / ${events.length} events`,
+      `Scrape result: ${detailedEvents.length} / ${attempted} events` +
+        (skippedNonWhitelisted
+          ? ` (${skippedNonWhitelisted} filtered by promotion whitelist)`
+          : ""),
     );
 
     // Validate scrape health before overwriting the cache
-    const successRate = detailedEvents.length / events.length;
+    const successRate = attempted ? detailedEvents.length / attempted : 1;
 
     if (!detailedEvents.length || successRate < MIN_SUCCESS_RATE) {
       console.warn("Scrape appears degraded. Keeping existing cache.");

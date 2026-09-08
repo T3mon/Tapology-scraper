@@ -2,7 +2,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const baseUrl = "https://www.tapology.com";
-const MAX_EVENTS = 10;
+const MAX_EVENTS = 25;
 
 const ALLOWED_PROMOTIONS = {
   "Ultimate Fighting Championship": "UFC",
@@ -53,7 +53,7 @@ const { chromium } = require("playwright");
 
 let browser;
 
-const fetchHtml = async (url) => {
+const fetchHtml = async (url, { waitForText, waitForSelector } = {}) => {
   if (!browser) {
     browser = await chromium.launch({
       headless: false,
@@ -73,8 +73,22 @@ const fetchHtml = async (url) => {
       timeout: 30000,
     });
 
-    // Give the page time to finish any normal browser-side loading.
-    await page.waitForTimeout(5000);
+    // The content we actually need typically hydrates in ~1-2s; bail out as
+    // soon as it shows up instead of always eating a blind 5s.
+    if (waitForSelector) {
+      await page.waitForSelector(waitForSelector, { timeout: 10000 }).catch(() => {});
+    } else if (waitForText) {
+      await page
+        .waitForFunction(
+          (text) => document.body.innerText.includes(text),
+          waitForText,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+    } else {
+      // Give the page time to finish any normal browser-side loading.
+      await page.waitForTimeout(5000);
+    }
 
     return await page.content();
   } finally {
@@ -117,7 +131,9 @@ const fetchUpcomingEvents = async (orgMode = "major") => {
       ? `${baseUrl}/fightcenter?schedule=upcoming`
       : `${baseUrl}/fightcenter?group=major&schedule=upcoming`;
 
-  const html = await fetchHtml(url);
+  const html = await fetchHtml(url, {
+    waitForSelector: "a[href^='/fightcenter/events/']",
+  });
 
   if (isBlockedResponse(html)) {
     throw new Error("Blocked while fetching upcoming events");
@@ -148,10 +164,12 @@ const fetchUpcomingEvents = async (orgMode = "major") => {
 
 const fetchEventDetails = async (events) => {
   const results = [];
+  let skippedNonWhitelisted = 0;
 
-  for (const event of events) {
+  for (const [i, event] of events.entries()) {
     try {
-      const html = await fetchHtml(event.link);
+      console.log(`Fetching [${i + 1}/${events.length}]: ${event.title}`);
+      const html = await fetchHtml(event.link, { waitForText: "Promotion:" });
 
       if (isBlockedResponse(html)) {
         console.warn(`Blocked or degraded page: ${event.link}`);
@@ -193,6 +211,7 @@ const fetchEventDetails = async (events) => {
         console.log(
           `Skipping non-whitelisted promotion "${fullOrganization || "unknown"}": ${event.title}`,
         );
+        skippedNonWhitelisted++;
         continue;
       }
 
@@ -279,7 +298,10 @@ const fetchEventDetails = async (events) => {
         });
       });
 
-      if (!fights.length) continue;
+      if (!fights.length) {
+        console.log(`No fights parsed, skipping: ${event.title}`);
+        continue;
+      }
 
       results.push({
         ...event,
@@ -292,6 +314,8 @@ const fetchEventDetails = async (events) => {
         promotionLinks,
       });
 
+      console.log(`Kept [${organization}]: ${event.title}`);
+
       await delay(2500 + Math.random() * 2000);
     } catch (err) {
       console.error(`Failed event ${event.link}:`, err.message);
@@ -299,7 +323,7 @@ const fetchEventDetails = async (events) => {
     }
   }
 
-  return results;
+  return { events: results, skippedNonWhitelisted };
 };
 
 module.exports = {
