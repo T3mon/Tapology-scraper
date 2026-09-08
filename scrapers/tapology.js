@@ -2,7 +2,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const baseUrl = "https://www.tapology.com";
-const MAX_EVENTS = 10;
+const MAX_EVENTS = 40;
 
 const ALLOWED_PROMOTIONS = {
   "Ultimate Fighting Championship": "UFC",
@@ -53,7 +53,7 @@ const { chromium } = require("playwright");
 
 let browser;
 
-const fetchHtml = async (url) => {
+const fetchHtml = async (url, { waitForText } = {}) => {
   if (!browser) {
     browser = await chromium.launch({
       headless: false,
@@ -73,8 +73,20 @@ const fetchHtml = async (url) => {
       timeout: 30000,
     });
 
-    // Give the page time to finish any normal browser-side loading.
-    await page.waitForTimeout(5000);
+    if (waitForText) {
+      // The content we actually need (e.g. "Promotion:") typically hydrates
+      // in ~1-2s; bail out as soon as it shows up
+      await page
+        .waitForFunction(
+          (text) => document.body.innerText.includes(text),
+          waitForText,
+          { timeout: 10000 },
+        )
+        .catch(() => {});
+    } else {
+      // Give the page time to finish any normal browser-side loading.
+      await page.waitForTimeout(5000);
+    }
 
     return await page.content();
   } finally {
@@ -151,7 +163,7 @@ const fetchEventDetails = async (events) => {
 
   for (const event of events) {
     try {
-      const html = await fetchHtml(event.link);
+      const html = await fetchHtml(event.link, { waitForText: "Promotion:" });
 
       if (isBlockedResponse(html)) {
         console.warn(`Blocked or degraded page: ${event.link}`);
