@@ -1,55 +1,11 @@
-const axios = require("axios");
 const cheerio = require("cheerio");
+const { chromium } = require("playwright");
+const ALLOWED_PROMOTIONS = require("../config/allowedPromotions");
 
 const baseUrl = "https://www.tapology.com";
 const MAX_EVENTS = 25;
 
-const ALLOWED_PROMOTIONS = {
-  "Ultimate Fighting Championship": "UFC",
-  "UFC BJJ": "UFCBJJ",
-  "Dana White's Contender Series": "DWCS",
-  "Professional Fighters League": "PFL",
-  "RIZIN Fighting Federation": "RIZIN",
-  "ONE Championship": "ONE",
-  "Zuffa Boxing": "ZUFFA",
-  "Matchroom Boxing": "MATCHROOM",
-  "Top Rank": "TOP RANK",
-  "Most Valuable Promotions": "MVP",
-  "Real American Freestyle": "RAF",
-  "Bare Knuckle Fighting Championship": "BKFC",
-  "Karate Combat": "KARATE COMBAT",
-};
-
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
-
-const axiosClient = axios.create({
-  timeout: 15000,
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    Referer: "https://www.tapology.com/",
-    Connection: "keep-alive",
-  },
-});
-
-/** Tapology is behind Cloudflare; plain HTTP clients often get 403 without a real browser. */
-const tapologyBlockedError = () => {
-  const err = new Error(
-    "Tapology returned HTTP 403 (Cloudflare). Automated requests from this environment cannot pass the browser check.",
-  );
-  err.code = "TAPOLOGY_BLOCKED";
-  return err;
-};
-
-const { chromium } = require("playwright");
 
 let browser;
 
@@ -125,20 +81,12 @@ const isBlockedResponse = (html) => {
    UPCOMING EVENTS
 -------------------------- */
 
-const fetchUpcomingEvents = async (orgMode = "major") => {
-  const url =
-    orgMode === "all"
-      ? `${baseUrl}/fightcenter?schedule=upcoming`
-      : `${baseUrl}/fightcenter?group=major&schedule=upcoming`;
+const buildFightcenterUrl = (orgMode) =>
+  orgMode === "all"
+    ? `${baseUrl}/fightcenter?schedule=upcoming`
+    : `${baseUrl}/fightcenter?group=major&schedule=upcoming`;
 
-  const html = await fetchHtml(url, {
-    waitForSelector: "a[href^='/fightcenter/events/']",
-  });
-
-  if (isBlockedResponse(html)) {
-    throw new Error("Blocked while fetching upcoming events");
-  }
-
+const parseEventLinks = (html) => {
   const $ = cheerio.load(html);
   const eventMap = new Map();
 
@@ -155,12 +103,133 @@ const fetchUpcomingEvents = async (orgMode = "major") => {
     eventMap.set(link, { title, link });
   });
 
-  return Array.from(eventMap.values()).slice(0, MAX_EVENTS);
+  return Array.from(eventMap.values());
+};
+
+const fetchUpcomingEvents = async (orgMode = "major") => {
+  const url = buildFightcenterUrl(orgMode);
+
+  const html = await fetchHtml(url, {
+    waitForSelector: "a[href^='/fightcenter/events/']",
+  });
+
+  if (isBlockedResponse(html)) {
+    throw new Error("Blocked while fetching upcoming events");
+  }
+
+  return parseEventLinks(html).slice(0, MAX_EVENTS);
 };
 
 /* -------------------------
    EVENT DETAILS
 -------------------------- */
+
+const getMetaValue = ($, label) => {
+  let value = null;
+
+  $("li").each((_, el) => {
+    const key = $(el).find("span.font-bold").text().trim();
+    if (key.startsWith(label)) {
+      value = $(el).find("span.text-neutral-700").first().text().trim();
+    }
+  });
+
+  return value || null;
+};
+
+const parseFighter = (container) => {
+  return {
+    name: container.find(".link-primary-red").text().trim(),
+    record:
+      container
+        .find("span.text-\\[15px\\], span.md\\:text-xs")
+        .first()
+        .text()
+        .trim() || null,
+    link: container.find(".link-primary-red").attr("href")
+      ? baseUrl + container.find(".link-primary-red").attr("href")
+      : null,
+  };
+};
+
+const parseFights = ($) => {
+  const fights = [];
+
+  $("ul[data-event-view-toggle-target='list'] li").each((_, el) => {
+    const fighterContainers = $(el).find(
+      ".div.flex.flex-row.gap-0\\.5.md\\:gap-0.w-full",
+    );
+
+    if (fighterContainers.length < 2) return;
+
+    const weightClass = (() => {
+      const badge = $(el)
+        .find("span.rounded")
+        .filter((_, s) => {
+          const text = $(s).text().trim();
+          return /^\d{2,3}$/.test(text);
+        })
+        .first()
+        .text()
+        .trim();
+
+      return badge ? `${badge} lbs` : null;
+    })();
+
+    const fighterA = parseFighter(fighterContainers.eq(0));
+    const fighterB = parseFighter(fighterContainers.eq(1));
+
+    if (!fighterA.name || !fighterB.name) return;
+
+    fights.push({ fighterA, fighterB, weightClass });
+  });
+
+  return fights;
+};
+
+/**
+ * Parses one event detail page's HTML into structured data. Pure (no
+ * network) so it's unit-testable against fixture HTML without a real
+ * browser. Returns one of:
+ *   { status: "blocked" }
+ *   { status: "skipped-whitelist", fullOrganization }
+ *   { status: "ok", event: {...} }
+ */
+const parseEventDetailPage = (html, event) => {
+  if (isBlockedResponse(html)) {
+    return { status: "blocked" };
+  }
+
+  const $ = cheerio.load(html);
+
+  const date = getMetaValue($, "Date/Time:");
+  const venue = getMetaValue($, "Venue:");
+  const location = getMetaValue($, "Location:");
+
+  const promoMatch = $("body")
+    .text()
+    .match(/Promotion:\s*([^\n•]+)/i);
+
+  const fullOrganization = promoMatch ? promoMatch[1].trim() : null;
+  const organization = ALLOWED_PROMOTIONS[fullOrganization];
+
+  if (!organization) {
+    return { status: "skipped-whitelist", fullOrganization };
+  }
+
+  return {
+    status: "ok",
+    event: {
+      ...event,
+      organization,
+      fullOrganization,
+      date,
+      venue,
+      location,
+      fights: parseFights($),
+    },
+  };
+};
 
 const fetchEventDetails = async (events) => {
   const results = [];
@@ -170,147 +239,26 @@ const fetchEventDetails = async (events) => {
     try {
       console.log(`Fetching [${i + 1}/${events.length}]: ${event.title}`);
       const html = await fetchHtml(event.link, { waitForText: "Promotion:" });
+      const parsed = parseEventDetailPage(html, event);
 
-      if (isBlockedResponse(html)) {
+      if (parsed.status === "blocked") {
         console.warn(`Blocked or degraded page: ${event.link}`);
         await delay(15000);
         continue;
       }
 
-      const $ = cheerio.load(html);
-
-      /* ---------- EVENT META ---------- */
-
-      const getMetaValue = (label) => {
-        let value = null;
-
-        $("li").each((_, el) => {
-          const key = $(el).find("span.font-bold").text().trim();
-          if (key.startsWith(label)) {
-            value = $(el).find("span.text-neutral-700").first().text().trim();
-          }
-        });
-
-        return value || null;
-      };
-
-      const date = getMetaValue("Date/Time:");
-      const venue = getMetaValue("Venue:");
-      const location = getMetaValue("Location:");
-
-      /* ---------- ORGANIZATION ---------- */
-
-      const promoMatch = $("body")
-        .text()
-        .match(/Promotion:\s*([^\n•]+)/i);
-
-      const fullOrganization = promoMatch ? promoMatch[1].trim() : null;
-      const organization = ALLOWED_PROMOTIONS[fullOrganization];
-
-      if (!organization) {
+      if (parsed.status === "skipped-whitelist") {
         console.log(
-          `Skipping non-whitelisted promotion "${fullOrganization || "unknown"}": ${event.title}`,
+          `Skipping non-whitelisted promotion "${parsed.fullOrganization || "unknown"}": ${event.title}`,
         );
         skippedNonWhitelisted++;
         continue;
       }
 
-      const promotionLinks = {};
-
-      $("li")
-        .filter((_, el) =>
-          $(el).find("span.font-bold").text().includes("Promotion Links"),
-        )
-        .find("a[href]")
-        .each((_, a) => {
-          const href = $(a).attr("href");
-          if (!href) return;
-
-          if (href.includes("facebook.com")) promotionLinks.facebook = href;
-          else if (href.includes("instagram.com"))
-            promotionLinks.instagram = href;
-          else if (href.includes("x.com") || href.includes("twitter.com"))
-            promotionLinks.twitter = href;
-          else if (href.includes("youtube.com")) promotionLinks.youtube = href;
-          else if (href.includes("tiktok.com")) promotionLinks.tiktok = href;
-          else if (href.includes("wikipedia.org"))
-            promotionLinks.wikipedia = href;
-          else promotionLinks.website = href;
-        });
-
-      /* ---------- FIGHTS ---------- */
-
-      const fights = [];
-
-      $("ul[data-event-view-toggle-target='list'] li").each((_, el) => {
-        const fighterContainers = $(el).find(
-          ".div.flex.flex-row.gap-0\\.5.md\\:gap-0.w-full",
-        );
-
-        if (fighterContainers.length < 2) return;
-
-        const weightClass = (() => {
-          const badge = $(el)
-            .find("span.rounded")
-            .filter((_, s) => {
-              const text = $(s).text().trim();
-              return /^\d{2,3}$/.test(text);
-            })
-            .first()
-            .text()
-            .trim();
-
-          return badge ? `${badge} lbs` : null;
-        })();
-
-        const parseFighter = (container) => {
-          const flagImg = container.find("img[src^='/assets/flags']").first();
-
-          const pictureImg = container
-            .find("img[src^='https://images.tapology.com']")
-            .first();
-
-          return {
-            name: container.find(".link-primary-red").text().trim(),
-            record:
-              container
-                .find("span.text-\\[15px\\], span.md\\:text-xs")
-                .first()
-                .text()
-                .trim() || null,
-            country: flagImg.length ? baseUrl + flagImg.attr("src") : null,
-            picture: pictureImg.attr("src") || null,
-            link: container.find(".link-primary-red").attr("href")
-              ? baseUrl + container.find(".link-primary-red").attr("href")
-              : null,
-          };
-        };
-
-        const fighterA = parseFighter(fighterContainers.eq(0));
-        const fighterB = parseFighter(fighterContainers.eq(1));
-
-        if (!fighterA.name || !fighterB.name) return;
-
-        fights.push({
-          fighterA,
-          fighterB,
-          weightClass,
-        });
-      });
-
-      results.push({
-        ...event,
-        organization,
-        fullOrganization,
-        date,
-        venue,
-        location,
-        fights,
-        promotionLinks,
-      });
+      results.push(parsed.event);
 
       console.log(
-        `Kept [${organization}] (${fights.length} fights): ${event.title}`,
+        `Kept [${parsed.event.organization}] (${parsed.event.fights.length} fights): ${event.title}`,
       );
 
       await delay(2500 + Math.random() * 2000);
@@ -326,4 +274,8 @@ const fetchEventDetails = async (events) => {
 module.exports = {
   fetchUpcomingEvents,
   fetchEventDetails,
+  buildFightcenterUrl,
+  parseEventLinks,
+  parseEventDetailPage,
+  isBlockedResponse,
 };
