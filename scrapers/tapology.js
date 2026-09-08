@@ -2,8 +2,23 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const baseUrl = "https://www.tapology.com";
-const majorOrgs = ["UFC", "PFL", "BELLATOR", "ONE", "RIZIN"];
 const MAX_EVENTS = 10;
+
+const ALLOWED_PROMOTIONS = {
+  "Ultimate Fighting Championship": "UFC",
+  "UFC BJJ": "UFCBJJ",
+  "Dana White's Contender Series": "DWCS",
+  "Professional Fighters League": "PFL",
+  "RIZIN Fighting Federation": "RIZIN",
+  "ONE Championship": "ONE",
+  "Zuffa Boxing": "ZUFFA",
+  "Matchroom Boxing": "MATCHROOM",
+  "Top Rank": "TOP RANK",
+  "Most Valuable Promotions": "MVP",
+  "Real American Freestyle": "RAF",
+  "Bare Knuckle Fighting Championship": "BKFC",
+  "Karate Combat": "KARATE COMBAT",
+};
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
@@ -167,31 +182,19 @@ const fetchEventDetails = async (events) => {
 
       /* ---------- ORGANIZATION ---------- */
 
-      let fullOrganization = "Other";
       const promoMatch = $("body")
         .text()
         .match(/Promotion:\s*([^\n•]+)/i);
 
-      if (promoMatch) fullOrganization = promoMatch[1].trim();
+      const fullOrganization = promoMatch ? promoMatch[1].trim() : null;
+      const organization = ALLOWED_PROMOTIONS[fullOrganization];
 
-      const orgMap = {
-        "Ultimate Fighting Championship": "UFC",
-        "Professional Fighters League": "PFL",
-        "Bellator MMA": "BELLATOR",
-        "ONE Championship": "ONE",
-        "Rizin Fighting Federation": "RIZIN",
-        "Absolute Championship Akhmat": "ACA",
-        "Konfrontacja Sztuk Walki": "KSW",
-        "Cage Warriors": "CW",
-        "Invicta FC": "INVICTA",
-        "Oktagon MMA": "OKTAGON",
-        "Legacy Fighting Alliance": "LFA",
-      };
-
-      const organization =
-        orgMap[fullOrganization] ||
-        majorOrgs.find((o) => event.title.toUpperCase().includes(o)) ||
-        "Other";
+      if (!organization) {
+        console.log(
+          `Skipping non-whitelisted promotion "${fullOrganization || "unknown"}": ${event.title}`,
+        );
+        continue;
+      }
 
       const promotionLinks = {};
 
