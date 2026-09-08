@@ -53,7 +53,7 @@ const { chromium } = require("playwright");
 
 let browser;
 
-const fetchHtml = async (url, { waitForText } = {}) => {
+const fetchHtml = async (url, { waitForText, waitForSelector } = {}) => {
   if (!browser) {
     browser = await chromium.launch({
       headless: false,
@@ -73,9 +73,11 @@ const fetchHtml = async (url, { waitForText } = {}) => {
       timeout: 30000,
     });
 
-    if (waitForText) {
-      // The content we actually need (e.g. "Promotion:") typically hydrates
-      // in ~1-2s; bail out as soon as it shows up
+    // The content we actually need typically hydrates in ~1-2s; bail out as
+    // soon as it shows up instead of always eating a blind 5s.
+    if (waitForSelector) {
+      await page.waitForSelector(waitForSelector, { timeout: 10000 }).catch(() => {});
+    } else if (waitForText) {
       await page
         .waitForFunction(
           (text) => document.body.innerText.includes(text),
@@ -129,7 +131,9 @@ const fetchUpcomingEvents = async (orgMode = "major") => {
       ? `${baseUrl}/fightcenter?schedule=upcoming`
       : `${baseUrl}/fightcenter?group=major&schedule=upcoming`;
 
-  const html = await fetchHtml(url);
+  const html = await fetchHtml(url, {
+    waitForSelector: "a[href^='/fightcenter/events/']",
+  });
 
   if (isBlockedResponse(html)) {
     throw new Error("Blocked while fetching upcoming events");
