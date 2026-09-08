@@ -4,6 +4,7 @@ const {
   fetchUpcomingEvents,
   fetchEventDetails,
 } = require("./scrapers/tapology");
+const { fetchNonMajorPromotionEvents } = require("./scrapers/promotionPages");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,7 +27,18 @@ app.get("/api/events", async (req, res) => {
 
     console.log("Starting new scrape...");
 
-    const events = await fetchUpcomingEvents();
+    const majorEvents = await fetchUpcomingEvents();
+    const nonMajorEvents = await fetchNonMajorPromotionEvents();
+
+    // Merge/dedupe - the two discovery paths shouldn't overlap (major vs.
+    // non-major promotions are mutually exclusive) but a shared Map keeps
+    // this correct even if that ever changes.
+    const eventMap = new Map();
+    for (const event of [...majorEvents, ...nonMajorEvents]) {
+      eventMap.set(event.link, event);
+    }
+    const events = Array.from(eventMap.values());
+
     const { events: detailedEvents, skippedNonWhitelisted } =
       await fetchEventDetails(events);
 
