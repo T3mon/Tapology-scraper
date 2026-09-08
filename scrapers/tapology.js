@@ -13,6 +13,7 @@ const fetchHtml = async (url, { waitForText, waitForSelector } = {}) => {
   if (!browser) {
     browser = await chromium.launch({
       headless: false,
+      args: ["--window-position=-32000,-32000", "--start-minimized"],
     });
   }
 
