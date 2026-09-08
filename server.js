@@ -12,6 +12,7 @@ app.use(cors());
 
 const { isCacheFresh, readCache, writeCache } = require("./utils/cache");
 const { evaluateScrape } = require("./utils/scrapeHealth");
+const { archiveEvents } = require("./utils/archive");
 
 app.get("/api/events", async (req, res) => {
   const forceRefresh = req.query.refresh === "true";
@@ -60,6 +61,7 @@ app.get("/api/events", async (req, res) => {
     }
 
     writeCache(detailedEvents);
+    archiveEvents(detailedEvents);
     console.log("Cache updated successfully");
 
     res.json(detailedEvents);
