@@ -1,43 +1,39 @@
-# MMA Events API
+# Combat Sports Events API
 
-A basic web scraper and API that shows upcoming MMA events from [tapology.com](https://www.tapology.com).
+A web scraper and API that shows upcoming combat sports events from [tapology.com](https://www.tapology.com) - MMA, boxing, bare-knuckle, kickboxing/Muay Thai, and wrestling, from a curated whitelist of promotions (UFC, ONE Championship, PFL, RIZIN, Dana White's Contender Series, UFC BJJ, Zuffa Boxing, Matchroom Boxing, Top Rank, Most Valuable Promotions, Real American Freestyle, Bare Knuckle FC, and Karate Combat).
 
 ## Features
 
-- Gets event names, dates, matchups, and locations
-- Serves the data through a simple API
+- Gets event names, dates, matchups, and locations for whitelisted promotions only
+- Includes promotions Tapology doesn't tag "major" (e.g. boxing, bare-knuckle) by scraping their own event pages directly, not just the main listing
+- Serves the data through a simple API, cached with health checks so a degraded scrape never overwrites good data
+- Archives a dated snapshot of each day's scrape to your Documents folder
 
 ## Example Response
 
 ```json
 [
   {
-    "title": "UFC 317: Topuria vs. Oliveira",
-    "date": "Saturday, June 28, 6:00 PM ET",
-    "link": "https://www.tapology.com/fightcenter/events/124086-ufc-317",
-    "orgImage": "https://images.tapology.com/logo_squares/1/icon_bw/UFC-Ultimate-Fighting-Championship-logo-square.jpg?1721405585",
-    "sport": "MMA",
-    "location": "Las Vegas, NV",
-    "region": "US West",
-    "watch": "Pay Per View",
+    "title": "UFC 334",
+    "link": "https://www.tapology.com/fightcenter/events/147320-ufc-334",
+    "organization": "UFC",
+    "fullOrganization": "Ultimate Fighting Championship",
+    "date": "Saturday 11.14.2026 at 05:00 PM ET",
+    "venue": "Madison Square Garden",
+    "location": "New York City, New York, United States",
     "fights": [
       {
-        "main": true,
-        "weight": "155 lbs",
         "fighterA": {
-          "name": "Ilia Topuria",
-          "record": "16-0",
-          "country": "https://www.tapology.com/assets/flags/GE-46e71ebd13f4e3f14b56f61538a1d026361bee9e3a68ed169cf30520d087c2fa.gif",
-          "picture": "https://images.tapology.com/headshot_images/129278/preview/Topuria-Hero.jpg?1659102670",
-          "link": "https://www.tapology.com/fightcenter/fighters/129278-ilia-topuria"
+          "name": "Nazim Sadykhov",
+          "record": "11-3-1",
+          "link": "https://www.tapology.com/fightcenter/fighters/135516-nazim-sadykhov"
         },
         "fighterB": {
-          "name": "Charles Oliveira",
-          "record": "35-10",
-          "country": "https://www.tapology.com/assets/flags/BR-45af1ab77cd750eff617a8b71f64b318c9a4ecf06c863a2c63cff71550930fe7.gif",
-          "picture": "https://images.tapology.com/headshot_images/1613/preview/Charles_Oliveira.jpg?1583713648",
-          "link": "https://www.tapology.com/fightcenter/fighters/charles-oliveira-do-bronx"
-        }
+          "name": "Jefferson Nascimento",
+          "record": "13-1",
+          "link": "https://www.tapology.com/fightcenter/fighters/239183-jefferson-todynho"
+        },
+        "weightClass": "155 lbs"
       }
     ]
   }
