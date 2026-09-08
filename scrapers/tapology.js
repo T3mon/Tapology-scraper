@@ -298,11 +298,6 @@ const fetchEventDetails = async (events) => {
         });
       });
 
-      if (!fights.length) {
-        console.log(`No fights parsed, skipping: ${event.title}`);
-        continue;
-      }
-
       results.push({
         ...event,
         organization,
@@ -314,7 +309,9 @@ const fetchEventDetails = async (events) => {
         promotionLinks,
       });
 
-      console.log(`Kept [${organization}]: ${event.title}`);
+      console.log(
+        `Kept [${organization}] (${fights.length} fights): ${event.title}`,
+      );
 
       await delay(2500 + Math.random() * 2000);
     } catch (err) {
