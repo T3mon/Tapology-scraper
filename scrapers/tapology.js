@@ -2,7 +2,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 const baseUrl = "https://www.tapology.com";
-const MAX_EVENTS = 40;
+const MAX_EVENTS = 25;
 
 const ALLOWED_PROMOTIONS = {
   "Ultimate Fighting Championship": "UFC",
@@ -160,9 +160,11 @@ const fetchUpcomingEvents = async (orgMode = "major") => {
 
 const fetchEventDetails = async (events) => {
   const results = [];
+  let skippedNonWhitelisted = 0;
 
-  for (const event of events) {
+  for (const [i, event] of events.entries()) {
     try {
+      console.log(`Fetching [${i + 1}/${events.length}]: ${event.title}`);
       const html = await fetchHtml(event.link, { waitForText: "Promotion:" });
 
       if (isBlockedResponse(html)) {
@@ -205,6 +207,7 @@ const fetchEventDetails = async (events) => {
         console.log(
           `Skipping non-whitelisted promotion "${fullOrganization || "unknown"}": ${event.title}`,
         );
+        skippedNonWhitelisted++;
         continue;
       }
 
@@ -291,7 +294,10 @@ const fetchEventDetails = async (events) => {
         });
       });
 
-      if (!fights.length) continue;
+      if (!fights.length) {
+        console.log(`No fights parsed, skipping: ${event.title}`);
+        continue;
+      }
 
       results.push({
         ...event,
@@ -304,6 +310,8 @@ const fetchEventDetails = async (events) => {
         promotionLinks,
       });
 
+      console.log(`Kept [${organization}]: ${event.title}`);
+
       await delay(2500 + Math.random() * 2000);
     } catch (err) {
       console.error(`Failed event ${event.link}:`, err.message);
@@ -311,7 +319,7 @@ const fetchEventDetails = async (events) => {
     }
   }
 
-  return results;
+  return { events: results, skippedNonWhitelisted };
 };
 
 module.exports = {
