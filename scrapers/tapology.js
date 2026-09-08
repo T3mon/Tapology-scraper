@@ -3,7 +3,8 @@ const { chromium } = require("playwright");
 const ALLOWED_PROMOTIONS = require("../config/allowedPromotions");
 
 const baseUrl = "https://www.tapology.com";
-const MAX_EVENTS = 25;
+// Pure safety backstop against a runaway loop
+const MAX_LISTING_PAGES = 50;
 
 const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
@@ -82,10 +83,14 @@ const isBlockedResponse = (html) => {
    UPCOMING EVENTS
 -------------------------- */
 
-const buildFightcenterUrl = (orgMode) =>
-  orgMode === "all"
-    ? `${baseUrl}/fightcenter?schedule=upcoming`
-    : `${baseUrl}/fightcenter?group=major&schedule=upcoming`;
+const buildFightcenterUrl = (orgMode, page = 1) => {
+  const base =
+    orgMode === "all"
+      ? `${baseUrl}/fightcenter?schedule=upcoming`
+      : `${baseUrl}/fightcenter?group=major&schedule=upcoming`;
+
+  return page > 1 ? `${base}&page=${page}` : base;
+};
 
 const parseEventLinks = (html) => {
   const $ = cheerio.load(html);
@@ -108,17 +113,38 @@ const parseEventLinks = (html) => {
 };
 
 const fetchUpcomingEvents = async (orgMode = "major") => {
-  const url = buildFightcenterUrl(orgMode);
+  const eventMap = new Map();
 
-  const html = await fetchHtml(url, {
-    waitForSelector: "a[href^='/fightcenter/events/']",
-  });
+  for (let pageNum = 1; pageNum <= MAX_LISTING_PAGES; pageNum++) {
+    const url = buildFightcenterUrl(orgMode, pageNum);
 
-  if (isBlockedResponse(html)) {
-    throw new Error("Blocked while fetching upcoming events");
+    const html = await fetchHtml(url, {
+      waitForSelector: "a[href^='/fightcenter/events/']",
+    });
+
+    if (isBlockedResponse(html)) {
+      if (pageNum === 1) {
+        throw new Error("Blocked while fetching upcoming events");
+      }
+      console.warn(`Blocked while fetching listing page ${pageNum}, stopping pagination early`);
+      break;
+    }
+
+    const sizeBefore = eventMap.size;
+    for (const event of parseEventLinks(html)) {
+      if (!eventMap.has(event.link)) eventMap.set(event.link, event);
+    }
+
+    console.log(
+      `Listing page ${pageNum}: ${eventMap.size} unique events so far`,
+    );
+
+    if (eventMap.size === sizeBefore) break; // reached the end of results
+
+    await delay(2500 + Math.random() * 2000);
   }
 
-  return parseEventLinks(html).slice(0, MAX_EVENTS);
+  return Array.from(eventMap.values());
 };
 
 /* -------------------------

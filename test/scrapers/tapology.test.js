@@ -21,6 +21,20 @@ describe("buildFightcenterUrl", () => {
       "https://www.tapology.com/fightcenter?schedule=upcoming",
     );
   });
+
+  test("omits the page param for page 1", () => {
+    assert.equal(
+      buildFightcenterUrl("major", 1),
+      "https://www.tapology.com/fightcenter?group=major&schedule=upcoming",
+    );
+  });
+
+  test("appends &page=N for later pages", () => {
+    assert.equal(
+      buildFightcenterUrl("major", 3),
+      "https://www.tapology.com/fightcenter?group=major&schedule=upcoming&page=3",
+    );
+  });
 });
 
 describe("parseEventLinks", () => {
