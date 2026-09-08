@@ -258,11 +258,31 @@ const parseEventDetailPage = (html, event) => {
   };
 };
 
+const EVENT_CONCURRENCY = 4;
+
+/**
+ * Runs `count` independent workers pulling from a shared index
+ * 4 concurent workers
+ */
+const runPool = async (items, count, handler) => {
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      await handler(items[i], i);
+    }
+  };
+
+  await Promise.all(Array.from({ length: count }, worker));
+};
+
 const fetchEventDetails = async (events) => {
   const results = [];
   let skippedNonWhitelisted = 0;
 
-  for (const [i, event] of events.entries()) {
+  await runPool(events, EVENT_CONCURRENCY, async (event, i) => {
     try {
       console.log(`Fetching [${i + 1}/${events.length}]: ${event.title}`);
       const html = await fetchHtml(event.link, { waitForText: "Promotion:" });
@@ -271,7 +291,7 @@ const fetchEventDetails = async (events) => {
       if (parsed.status === "blocked") {
         console.warn(`Blocked or degraded page: ${event.link}`);
         await delay(15000);
-        continue;
+        return;
       }
 
       if (parsed.status === "skipped-whitelist") {
@@ -279,7 +299,7 @@ const fetchEventDetails = async (events) => {
           `Skipping non-whitelisted promotion "${parsed.fullOrganization || "unknown"}": ${event.title}`,
         );
         skippedNonWhitelisted++;
-        continue;
+        return;
       }
 
       results.push(parsed.event);
@@ -293,7 +313,7 @@ const fetchEventDetails = async (events) => {
       console.error(`Failed event ${event.link}:`, err.message);
       await delay(8000);
     }
-  }
+  });
 
   return { events: results, skippedNonWhitelisted };
 };
